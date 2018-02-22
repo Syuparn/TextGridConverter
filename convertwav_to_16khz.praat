@@ -41,7 +41,10 @@ procedure convertWav: .directory$, .resampleRate
     		selectObject: .strings
     		.fileName$ = Get string: .i
     		Read from file: .directory$ + "/" + .fileName$
-    
+		
+		#convert to monoral
+		do("Convert to mono")
+		
     		#resample wav file
     		Resample: .resampleRate, 50
 		appendInfoLine: .directory$ + "/" + .fileName$
