@@ -20,9 +20,17 @@ labels of .wav files for Praat automatically.
 ## Usage
 
 1. To convert .lab files in directory dir/to/path:
-'python convert_label.py dir/to/path'
+
+```
+python convert_label.py dir/to/path
+```
+
 2. Choose weather separate unit (phoneme or mora) is used
-'change segmentation unit to mora? (default:phoneme) y/n:'
+
+```
+change segmentation unit to mora? (default:phoneme) y/n:
+```
+
 3. This converts all .lab files in dir/to/path to .TextGrid files (recursively)
 
 ## Installation
