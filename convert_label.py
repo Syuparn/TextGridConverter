@@ -1,22 +1,50 @@
 import re
 import os
 import sys
-import subprocess
+
 
 class ExtentionException(Exception):
     pass
 
 
-class InvalidSeparateUnitException(Exception):
-    pass
+class Segment:
+    """
+    a unit of speech (i.e. phoneme, mora)
+    """
+    def __init__(self, tStart, tEnd, label):
+        self.tStart = tStart
+        self.tEnd = tEnd
+        self.label = label
 
+    def __add__(self, other):
+        return Segment(self.tStart, other.tEnd, self.label + other.label)
 
-class MoraFormException(Exception):
-    pass
+    def can_follow(self, other):
+        """
+        return True if Segment self can follow Segment other in one mora,
+        otherwise return False
+        example: (other, self)
+             True: ('s', 'a'), ('i', ':'), ('k', 'y'), ('sh', 'a')
+             False: ('a', 'q'), ('a', 's'), ('u', 'e'), ('s', 'ha')
+        """
+        vowels = ['a', 'i', 'u', 'e', 'o']
+        longSoundSymbols = [':']
+        consonants = ['w', 'r', 't', 'y', 'p', 's', 'd', 'f', 'g', 'h', 'j',
+                      'k', 'z', 'c', 'b', 'n', 'm']
+        if other.label[-1] in consonants and self.label in vowels:
+            return True
+        if other.label[-1] in consonants and self.label in consonants:
+            return True
+        if other.label[-1] in vowels and self.label in longSoundSymbols:
+            return True
+        return False
 
-
-class TooFewArgumentException(Exception):
-    pass
+    def to_textgrid_lines(self, segmentIndex):
+        label = '' if self.label in ['silB', 'silE'] else self.label
+        return [f'        intervals [{segmentIndex}]:',
+                f'            xmin = {self.tStart} ',
+                f'            xmax = {self.tEnd} ',
+                f'            text = "{label}" ']
 
 
 def read_lab(filename):
@@ -32,160 +60,88 @@ def read_lab(filename):
         return None
         
     with open(filename, 'r') as f:
-        labeldata = [line.split() for line in f if line != ""]
-        label = SegmentationLabel(labeldata=labeldata)
-        return label
+        labeldata = [line.split() for line in f if line != '']
+        segments = [Segment(tStart=float(line[0]), tEnd=float(line[1]), 
+                            label=line[2])
+                    for line in labeldata]
+        return SegmentationLabel(segments)
 
 
 class SegmentationLabel:
     """
-    self._labeldata: list of [interval_start_time, interval_end_time, separate_unit]
+    list of segments
     """
-    def __init__(self, separate_unit='phoneme', labeldata=None):
-        self._labeldata = labeldata
-        self._separate_unit = separate_unit
-    
-    def _phoneme_to_mora(self):
-        def _merge_interval(interval1, interval2):
-            if not interval1:
-                return interval2
-            if not interval2:
-                return interval1
-            
-            interval_merged = [interval1[0], 
-                               interval2[1],
-                               interval1[2] + interval2[2]]
-            return interval_merged
-        
-        vowels = ['a', 'i', 'u', 'e', 'o']
-        special_phonemes = ['q', 'N', 'silB', 'silE']
-        
-        labeldata_by_moras = []
-        mora_interval = None
-        
-        for phoneme_interval in self._labeldata:
-            unit = phoneme_interval[2]
-            if unit in vowels:
-                mora_interval = _merge_interval(mora_interval, phoneme_interval)
-                labeldata_by_moras.append(mora_interval)
-                mora_interval = None
-                
-            elif unit in special_phonemes:
-                try:
-                    if mora_interval:
-                        raise MoraFormException("a mora which doesn't "\
-                                                "have consonant appeared")
-                except MoraFormError as e:
-                    print(e)
-                    labeldata_by_moras.append(mora_interval)
-                
-                labeldata_by_moras.append(phoneme_interval)
-                mora_interval = None
-            else:
-                mora_interval = _merge_interval(mora_interval, phoneme_interval) 
-        
-        return labeldata_by_moras
-    
+    def __init__(self, segments, separatedByMora=False):
+        self.segments = segments
+        self.separatedByMora = separatedByMora
+
     def by_moras(self):
         """
-        return new SegmentationLabel object whose separate_unit is mora 
+        return new SegmentationLabel object whose segment are moras 
         """
-        try:
-            if self._separate_unit == 'mora':
-                label_by_moras = SegmentationLabel(separate_unit='mora', 
-                                               labeldata=self._labeldata)
-                return label_by_moras
-                                       
-            elif self._separate_unit == 'phoneme':
-                self._separate_unit = 'mora'
-                labeldata_by_moras = self._phoneme_to_mora()
-                label_by_moras = SegmentationLabel(separate_unit='mora', 
-                                               labeldata=labeldata_by_moras)
-                return label_by_moras
-        
+        if self.separatedByMora == True:
+            return self
+
+        moraSegments = []
+        curMoraSegment = None
+        for segment in self.segments:
+            if curMoraSegment is None:
+                curMoraSegment = segment
+            elif segment.can_follow(curMoraSegment):
+                curMoraSegment += segment
             else:
-                raise InvalidSeparateUnitException(
-                    "value of self._separate_unit is invalid")
-        except InvalidSeparateUnitException as e:
-            print(e)
-            return None        
-    
-    def labeldata(self):
+                moraSegments.append(curMoraSegment)
+                curMoraSegment = segment
+
+        return SegmentationLabel(moraSegments, separatedByMora=True)
+
+    def _textgrid_headers(self):
+        segmentKind = 'mora' if self.separatedByMora else 'phoneme'
+        return ['File type = "ooTextFile"',
+                'Object class = "TextGrid"',
+                ' ',
+                'xmin = 0 ',
+               f'xmax = {self.segments[-1].tEnd} ',
+                'tiers? <exists> ',
+                'size = 1 ',
+                'item []: ',
+                '    item [1]: ',
+                '        class = "IntervalTier" ',
+               f'        name = "{segmentKind}" ',
+                '        xmin = 0 ',
+               f'        xmax = {self.segments[-1].tEnd} ',
+               f'        intervals: size = {len(self.segments)} ']
+
+    def to_textgrid(self, textgridFileName):
         """
-        get self._labeldata
+        save to .TextGrid file, which is available for Praat
         """
-        return self._labeldata
-    
-    def _convert_line(self, labelunit, num):
-        t_min = labelunit[0]
-        t_max = labelunit[1]
-        if labelunit[2] in ['silB', 'silE']:
-            unitname = ""
-        else:
-            unitname = labelunit[2]
-        
-        return [f'        intervals [{num + 1}]:',
-                f'            xmin = {t_min} ',
-                f'            xmax = {t_max} ',
-                f'            text = "{unitname}" ']
-    
-    def _convert_labeldata(self):
-        t_max = self._labeldata[-1][1]
-        textgrid = ['File type = "ooTextFile"',
-                    'Object class = "TextGrid"',
-                    ' ',
-                    'xmin = 0 ',
-                   f'xmax = {t_max} ',
-                    'tiers? <exists> ',
-                    'size = 1 ',
-                    'item []: ',
-                    '    item [1]: ',
-                    '        class = "IntervalTier" ',
-                   f'        name = "{self._separate_unit}" ',
-                    '        xmin = 0 ',
-                   f'        xmax = {t_max} ',
-                   f'        intervals: size = {len(self._labeldata)} ']
-        
-        for i, labelunit in enumerate(self._labeldata):
-            textgrid.extend(self._convert_line(labelunit, i))
-        
-        return textgrid
-    
-    def to_textgrid(self, textgrid_filename):
-        """
-        save self._labeldata to .TextGrid file (available for Praat)
-        """
-        textgrid = self._convert_labeldata()
-        with open(textgrid_filename, 'w') as f:
-            f.write("\n".join(textgrid))
+        textgridLines = self._textgrid_headers()
+        for i, segment in enumerate(self.segments):
+            textgridLines.extend(segment.to_textgrid_lines(i + 1))
+        with open(textgridFileName, 'w') as f:
+            f.write('\n'.join(textgridLines))
 
 
 if __name__ == '__main__':
     args = sys.argv
-    try:
-        if len(args) >= 2:
-            main_directory = args[1]
-        else:
-            raise TooFewArgumentException('you should put directory'\
-                                          'path in commandline argument')
-    except TooFewArgumentException as e:
-        print(e)
-        sys.exit()
-    
-    separated_by_mora = None
-    while not separated_by_mora in ['y', 'Y', 'n', 'N']:
-        separated_by_mora = input('change segmentation unit to mora?'\
-                                ' (default:phoneme) y/n:')
-    
-    for dirpath, dirnames, filenames in os.walk(main_directory):
-        lab_filenames = [filename for filename in filenames 
-                            if re.search(r'\.lab$', filename)]
-        
-        for lab_filename in lab_filenames:
-            label = read_lab(dirpath + '/' + lab_filename)
-            
-            if separated_by_mora in ['Y', 'y']:
+    if len(args) >= 2:
+        mainDirectory = args[1]
+    else:
+        mainDirectory = os.curdir
+
+    answer = None
+    while not answer in ['y', 'Y', 'n', 'N']:
+        answer = input('change segmentation unit to mora?'\
+                       ' (default:phoneme) y/n:')
+        choosesMora = answer in ['y', 'Y']
+
+    for dirPath, dirNames, fileNames in os.walk(mainDirectory):
+        labFileNames = [n for n in fileNames if re.search(r'\.lab$', n)]
+
+        for labFileName in labFileNames:
+            label = read_lab(os.path.join(dirPath, labFileName))
+            if choosesMora:
                 label = label.by_moras()
-            
-            textgrid_filename = re.sub(r"\.lab$", ".TextGrid", lab_filename)
-            label.to_textgrid(dirpath + '/' + textgrid_filename)
+            textgridFileName = re.sub(r"\.lab$", ".TextGrid", labFileName)
+            label.to_textgrid(os.path.join(dirPath, textgridFileName))
