@@ -92,7 +92,8 @@ class SegmentationLabel:
             else:
                 moraSegments.append(curMoraSegment)
                 curMoraSegment = segment
-
+        if curMoraSegment:
+            moraSegments.append(curMoraSegment)
         return SegmentationLabel(moraSegments, separatedByMora=True)
 
     def _textgrid_headers(self):
