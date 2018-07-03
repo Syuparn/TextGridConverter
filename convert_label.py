@@ -24,18 +24,16 @@ class Segment:
         return True if Segment self can follow Segment other in one mora,
         otherwise return False
         example: (other, self)
-             True: ('s', 'a'), ('i', ':'), ('k', 'y'), ('sh', 'a')
+             True: ('s', 'a'), ('sh', 'i'), ('ky', 'o:'), ('t', 's')
              False: ('a', 'q'), ('a', 's'), ('u', 'e'), ('s', 'ha')
         """
-        vowels = ['a', 'i', 'u', 'e', 'o']
-        longSoundSymbols = [':']
+        vowels = ['a', 'i', 'u', 'e', 'o', 'a:', 'i:', 'u:', 'e:', 'o:']
         consonants = ['w', 'r', 't', 'y', 'p', 's', 'd', 'f', 'g', 'h', 'j',
                       'k', 'z', 'c', 'b', 'n', 'm']
-        if other.label[-1] in consonants and self.label in vowels:
+        only_consonants = lambda x: all([c in consonants for c in x])
+        if only_consonants(other.label) and self.label in vowels:
             return True
-        if other.label[-1] in consonants and self.label in consonants:
-            return True
-        if other.label[-1] in vowels and self.label in longSoundSymbols:
+        if only_consonants(other.label) and only_consonants(self.label):
             return True
         return False
 
