@@ -6,6 +6,9 @@ import sys
 class ExtentionException(Exception):
     pass
 
+class EmptyLabelException(Exception):
+    pass
+
 
 class Segment:
     """
@@ -115,6 +118,14 @@ class SegmentationLabel:
         """
         save to .TextGrid file, which is available for Praat
         """
+        try:
+            if not self.segments:
+                raise EmptyLabelException(f'warning: no label data found in '
+                                          f'{textgridFileName}')
+        except EmptyLabelException as e:
+            print(e)
+            return
+
         textgridLines = self._textgrid_headers()
         for i, segment in enumerate(self.segments):
             textgridLines.extend(segment.to_textgrid_lines(i + 1))
