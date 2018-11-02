@@ -2,7 +2,10 @@
 
 clearinfo
 
-directory$ = "dir/to/path"
+form directory_path
+	text directory
+endform
+
 @convertAllWav: directory$, 16000, 1
 
 
